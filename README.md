@@ -12,21 +12,17 @@ Every-time:
 
 ```shell
 # start up GPUs & navigate to directory
-salloc --nodes 1 --qos interactive --time 01:00:00 --constraint gpu --gpus 4 --account m4999_g
-cd ~/CS5470/async-ring-allreduce/rei
+salloc --nodes 1 --qos interactive --time 01:00:00 --constraint gpu --gpus 4 --account m4341_g
+cd $PSCRATCH/async-ring-allreduce/
 
-conda activate $PSCRATCH/project
-
-# compile (TODO: add new implementations here to be compiled)
-# NOTE: for the real benchmarking, compile with -DNDEBUG and -O2
-nvcc -o benchmark \
-    src/benchmark.cu src/utils.cu \
-    src/nccl_ringreduce.cu src/naive_ringreduce.cu \
-    src/pipelined_ringreduce_async.cu src/pipelined_ringreduce_nccl.cu \
-    -I$PSCRATCH/project/include \
-    -L$PSCRATCH/project/lib \
-    -lnccl -lpthread
-
-# run
-LD_LIBRARY_PATH=$PSCRATCH/project/lib NCCL_DEBUG=WARN ./benchmark 4 output.csv
+# specify number of ranks, outputfile, and optionally pass -r to compile for release
+./bench.sh n=4 f=output.csv
 ```
+
+## Contributing
+
+To add a new implementation, you will have to modify these files
+- `src/your-impl.cu` containing the implementation, refer to `src/interface.h`
+- `src/interface.h` containing the function signature for your implementation
+- `src/benchmark.cu` with `impls` and `impl_names` updated accordingly
+- `bench.sh` to compile with the newly created `your-impl.cu`

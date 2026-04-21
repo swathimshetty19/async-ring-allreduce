@@ -14,14 +14,12 @@
 // TODO: add new implementations here
 static RingRunFunc impls[] = {
     ring_pipelined_async,
-    ring_nccl,
     ring_naive,
 };
 
 static const char* impl_names[] = {
-    "Async",
-    "NCCL",
-    "Classic",
+    "Async Ring",
+    "Classic Ring",
 };
 
 
@@ -34,8 +32,8 @@ int main(int argc, char** argv) {
         return 1;
     }
     int n_devices = atoi(argv[1]);
-    if (n_devices != 2 && n_devices != 4) {
-        fprintf(stderr, "n_devices must be 2 or 4\n");
+    if (n_devices % 2 != 0) {
+        fprintf(stderr, "n_devices must be even\n");
         return 1;
     }
     std::string filename = "results/" + std::string(argv[2]);
