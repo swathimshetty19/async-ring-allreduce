@@ -9,7 +9,7 @@
 
 
 // interface function, runs for each rank
-void* ring_nccl(RunArgs* args) {
+void ring_nccl(RunArgs* args) {
     long input_size = args->input_size;
     ncclComm_t comm = args->comm;
     int rank, n_ranks, device;
@@ -71,5 +71,5 @@ void* ring_nccl(RunArgs* args) {
     CUDA_CALL(cudaFree(d_inbuf));
     CUDA_CALL(cudaFree(d_outbuf));
     CUDA_CALL(cudaStreamDestroy(stream));
-    return nullptr;
+    return;
 }

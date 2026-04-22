@@ -69,12 +69,12 @@ void analyze_runtime(RunArgs* args, double* deltas);
  * - it should run the ring implementation n_warmup times
  * - it should run the ring implementation n_iters more times and set avg_latency using get_time
  */
-typedef void* (*RingRunFunc)(RunArgs* args);
+typedef void (*RingRunFunc)(RunArgs* args);
 
 
 
 // TODO: add new implementations here
-void* ring_nccl(RunArgs* args);
-void* ring_naive(RunArgs* args);
-void* ring_pipelined_nccl(RunArgs* args);
-void* ring_pipelined_async(RunArgs* args);
+void ring_nccl(RunArgs* args);
+void ring_naive(RunArgs* args);
+void ring_pipelined_nccl(RunArgs* args);
+// void ring_pipelined_async(RunArgs* args);

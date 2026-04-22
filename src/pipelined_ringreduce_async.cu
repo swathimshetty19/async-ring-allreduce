@@ -1,3 +1,4 @@
+// FIXME: this no longer works as we switched to multi-node setup
 // pipelined_ringreduce_async.cu
 // Implements ring all-reduce using pipelined RS + AG with p2p async_memcpy.
 
@@ -164,7 +165,7 @@ static void ring_allreduce(
 
 
 // interface function, runs for each rank
-void* ring_pipelined_async(RunArgs* args) {
+void ring_pipelined_async(RunArgs* args) {
     long input_size = args->input_size;
     ncclComm_t comm = args->comm;
     int rank, n_ranks, device;
@@ -215,7 +216,7 @@ void* ring_pipelined_async(RunArgs* args) {
         CUDA_CALL(cudaStreamDestroy(streams[0]));
         CUDA_CALL(cudaStreamDestroy(streams[1]));
         CUDA_CALL(cudaEventDestroy(g_events[rank]));
-        return nullptr;
+        return;
     }
 
 
@@ -242,5 +243,5 @@ void* ring_pipelined_async(RunArgs* args) {
     CUDA_CALL(cudaStreamDestroy(streams[0]));
     CUDA_CALL(cudaStreamDestroy(streams[1]));
     CUDA_CALL(cudaEventDestroy(g_events[rank]));
-    return nullptr;
+    return;
 }

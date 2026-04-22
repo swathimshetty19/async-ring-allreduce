@@ -11,12 +11,9 @@ conda create --prefix $PSCRATCH/project -c nvidia nccl
 Every-time:
 
 ```shell
-# start up GPUs & navigate to directory
-salloc --nodes 1 --qos interactive --time 01:00:00 --constraint gpu --gpus 4 --account m4341_g
 cd $PSCRATCH/async-ring-allreduce/
-
-# specify number of ranks, outputfile, and optionally pass -r to compile for release
-./bench.sh n=4 f=output.csv
+./build.sh          # compile, optionally pass -r to build in release mode
+sbatch ./run.sh     # run, modify node count before running
 ```
 
 ## Contributing

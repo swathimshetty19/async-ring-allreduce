@@ -3,8 +3,9 @@
 // latency while checking for correctness
 
 #include <assert.h>
-#include <pthread.h>
+#include <mpi.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <string>
 
@@ -13,46 +14,55 @@
 
 // TODO: add new implementations here
 static RingRunFunc impls[] = {
-    ring_pipelined_async,
+    ring_pipelined_nccl,
     ring_naive,
 };
 
 static const char* impl_names[] = {
-    "Async Ring",
+    "Pipelined Ring",
     "Classic Ring",
 };
 
 
 
-// Usage: ./benchmark <n_devices> <filename>
+// Usage: ./benchmark
 int main(int argc, char** argv) {
-    // parse CLI
-    if (argc < 3) {
-        printf("Usage: %s <n_devices> <filename> (example: %s 4 result.csv)\n", argv[0], argv[0]);
+    // initialize MPI
+    MPI_Init(&argc, &argv);
+    int rank, n_ranks;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &n_ranks);
+    if (n_ranks % 2 != 0) {
+        if (rank == 0) {
+            printf("the number of ranks must be even, got %d\n", n_ranks);
+            fflush(stdout);
+        }
+        MPI_Finalize();
         return 1;
     }
-    int n_devices = atoi(argv[1]);
-    if (n_devices % 2 != 0) {
-        fprintf(stderr, "n_devices must be even\n");
-        return 1;
+
+    // set up GPU for this process
+    int devices_per_node;
+    CUDA_CALL(cudaGetDeviceCount(&devices_per_node));  // may be 1 if MPI isolates devices
+    int local_rank = rank % devices_per_node;
+    CUDA_CALL(cudaSetDevice(local_rank));
+
+    // get NCCL Unique ID from rank 0
+    ncclUniqueId id;
+    if (rank == 0) NCCL_CALL(ncclGetUniqueId(&id));
+    MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    // initialize NCCL communicator
+    ncclComm_t comm;
+    NCCL_CALL(ncclCommInitRank(&comm, n_ranks, id, rank));
+
+    if (rank == 0) {
+        printf(
+            "impl,input_size,input_bytes,avg_latency,std_latency,min_latency,max_latency,"
+            "throughput\n"
+        );
+        fflush(stdout);
     }
-    std::string filename = "results/" + std::string(argv[2]);
-
-    // initialize device ranks (device[i] = rank[i])
-    int devices[n_devices];
-    for (int i = 0; i < n_devices; i++) devices[i] = i;
-
-    // create NCCL communicators
-    ncclComm_t comms[n_devices];
-    NCCL_CALL(ncclCommInitAll(comms, n_devices, devices));
-
-    // create output file
-    FILE* f = fopen(filename.c_str(), "w");
-    fprintf(
-        f,
-        "impl,input_size,input_bytes,avg_latency,std_latency,min_latency,max_latency,throughput\n"
-    );
-    fflush(f);
 
     const int n_warmup = 200;
     const int n_iters = 200;
@@ -62,75 +72,73 @@ int main(int argc, char** argv) {
 
     const int n_impl = sizeof(impls) / sizeof(impls[0]);
     for (int i = 0; i < n_impl; i++) {
-        printf("\n=== Running Implementation: %s ===\n", impl_names[i]);
-
-        // use long as 1073741824*2 could overflow, meaning our for loop won't terminate correctly
         for (long input_size = min_sz; input_size <= max_sz; input_size *= 2) {
             size_t n_bytes = (size_t)input_size * sizeof(float);
-            printf("input_size: %lu (%zu bytes), ", input_size, n_bytes);
 
-            // start thread for each GPU
-            auto impl = (void* (*)(void*))impls[i];
-            double avg_latency = 1.0;
-            double std_latency = 0.0;
-            double min_latency = 0.0;
-            double max_latency = 0.0;
+            double local_avg = 1.0;
+            double local_std = 0.0;
+            double local_min = 0.0;
+            double local_max = 0.0;
+            bool local_correct = 0;
 
-            pthread_t threads[n_devices];
-            RunArgs args[n_devices];
-            bool corrects[n_devices];
-            for (int r = 0; r < n_devices; r++) {
-                args[r].input_size = input_size;
-                args[r].comm = comms[r];
-                args[r].n_warmup = n_warmup;
-                args[r].n_iters = n_iters;
-                args[r].atol = atol;
-                args[r].correct = corrects + r;
-                args[r].avg_latency = &avg_latency;
-                args[r].std_latency = &std_latency;
-                args[r].min_latency = &min_latency;
-                args[r].max_latency = &max_latency;
+            RunArgs args;
+            args.input_size = input_size;
+            args.comm = comm;
+            args.n_warmup = n_warmup;
+            args.n_iters = n_iters;
+            args.atol = atol;
+            args.correct = &local_correct;
+            args.avg_latency = &local_avg;
+            args.std_latency = &local_std;
+            args.min_latency = &local_min;
+            args.max_latency = &local_max;
 
-                int rc = pthread_create(&threads[r], nullptr, impl, &args[r]);
-                if (rc) {
-                    fprintf(stderr, "Failed to create thread %d\n", r);
-                    exit(1);
+            // run the impl
+            impls[i](&args);
+
+            // run correctness check
+            int local_correct_int = int(local_correct);
+            int global_correct = 0;
+            MPI_Allreduce(&local_correct_int, &global_correct, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+            if (global_correct != 1) {
+                if (rank == 0) {
+                    printf("FAILED, stopping\n");
+                    fflush(stdout);
                 }
+                break;
             }
 
-            for (int r = 0; r < n_devices; r++) pthread_join(threads[r], nullptr);
+            // get global metrics (max to get slowest out of all ranks)
+            double global_avg;
+            double global_std;
+            double global_min;
+            double global_max;
+            MPI_Reduce(&local_avg, &global_avg, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+            MPI_Reduce(&local_std, &global_std, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+            MPI_Reduce(&local_min, &global_min, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+            MPI_Reduce(&local_max, &global_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
-            bool all_correct = true;
-            for (int r = 0; r < n_devices; r++) all_correct &= corrects[r];
-            if (all_correct) {
-                double throughput = n_bytes / avg_latency;
-                fprintf(
-                    f,
+            if (rank == 0) {
+                double throughput = n_bytes / global_avg;
+                printf(
                     "%s,%lu,%zu,%.3f,%.3f,%.3f,%.3f,%.3f\n",
                     impl_names[i],
                     input_size,
                     n_bytes,
-                    avg_latency,
-                    std_latency,
-                    min_latency,
-                    max_latency,
+                    global_avg,
+                    global_std,
+                    global_min,
+                    global_max,
                     throughput
                 );
-                fflush(f);
-                printf(
-                    "average latency: %.3fµs, throughput: %.3fbytes/µs\n", avg_latency, throughput
-                );
-            } else {
-                printf("FAILED, stopping");
-                break;
+                fflush(stdout);
             }
         }
     }
 
     // cleanup
-    for (int r = 0; r < n_devices; r++) ncclCommDestroy(comms[r]);
-    fclose(f);
-    printf("\nAll done. Results written to %s\n", filename.c_str());
+    NCCL_CALL(ncclCommDestroy(comm));
+    MPI_Finalize();
 
     return 0;
 }

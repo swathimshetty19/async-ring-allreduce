@@ -120,7 +120,7 @@ static void ring_allreduce(
 
 
 // interface function, runs for each rank
-void* ring_pipelined_nccl(RunArgs* args) {
+void ring_pipelined_nccl(RunArgs* args) {
     long input_size = args->input_size;
     ncclComm_t comm = args->comm;
     int rank, n_ranks, device;
@@ -164,7 +164,7 @@ void* ring_pipelined_nccl(RunArgs* args) {
         CUDA_CALL(cudaFree(d_outbuf));
         CUDA_CALL(cudaStreamDestroy(streams[0]));
         CUDA_CALL(cudaStreamDestroy(streams[1]));
-        return nullptr;
+        return;
     }
 
 
@@ -190,5 +190,5 @@ void* ring_pipelined_nccl(RunArgs* args) {
     CUDA_CALL(cudaFree(d_outbuf));
     CUDA_CALL(cudaStreamDestroy(streams[0]));
     CUDA_CALL(cudaStreamDestroy(streams[1]));
-    return nullptr;
+    return;
 }
