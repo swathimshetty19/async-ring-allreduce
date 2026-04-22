@@ -2,14 +2,6 @@
 
 ## How to run
 
-First-time:
-
-```shell
-conda create --prefix $PSCRATCH/project -c nvidia nccl
-```
-
-Every-time:
-
 ```shell
 cd $PSCRATCH/async-ring-allreduce/
 ./build.sh          # compile, optionally pass -r to build in release mode

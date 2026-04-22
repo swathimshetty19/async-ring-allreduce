@@ -45,7 +45,6 @@ int main(int argc, char** argv) {
     int devices_per_node;
     CUDA_CALL(cudaGetDeviceCount(&devices_per_node));  // may be 1 if MPI isolates devices
     int local_rank = rank % devices_per_node;
-    printf("Rank %d, local_rank %d dev/node %d\n", rank, local_rank, devices_per_node);
     CUDA_CALL(cudaSetDevice(local_rank));
 
     // get NCCL Unique ID from rank 0

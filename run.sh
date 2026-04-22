@@ -11,13 +11,33 @@
 #SBATCH --output=results/bench_%j.csv
 #SBATCH --error=results/bench_%j.err
 
+DEBUG="off"
+
+for arg in "$@"; do
+    case $arg in
+        -r)
+            echo "Running in Debug Mode"
+            DEBUG="on"
+            ;;
+    esac
+done
+
+if [[ "$DEBUG" == "on" ]]; then
+    export NCCL_DEBUG=INFO
+else
+    export NCCL_DEBUG=WARN
+fi
+
+# export FI_CXI_ATS=0
+# export OFI_NCCL_DISABLE_DMABUF=1
+export FI_CXI_RDZV_GET_MIN=0
+export FI_CXI_RDZV_THRESHOLD=0
+export FI_CXI_RDZV_EAGER_SIZE=0
+
 module purge
 module load PrgEnv-gnu
 module load cudatoolkit
 module load cray-mpich
 module load nccl
-
-export NCCL_DEBUG=INFO
-export FI_CXI_ATS=0
 
 srun -u --cpus-per-task=32 --cpu-bind=cores ./benchmark
