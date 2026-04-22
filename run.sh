@@ -4,7 +4,6 @@
 #SBATCH --ntasks-per-node=4
 #SBATCH --constraint gpu
 #SBATCH --gres=gpu:4
-#SBATCH --gpu-bind=map_gpu:0,1,2,3
 #SBATCH --cpus-per-task=32
 #SBATCH --account m4341_g
 #SBATCH --time=00:30:00
