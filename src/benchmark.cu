@@ -16,11 +16,15 @@
 static RingRunFunc impls[] = {
     ring_pipelined_nccl,
     ring_naive,
+    halving_doubling_allreduce,
+    halving_doubling_pipelined,
 };
 
 static const char* impl_names[] = {
     "Pipelined Ring",
     "Classic Ring",
+    "HD Baseline",
+    "HD Pipelined",
 };
 
 
