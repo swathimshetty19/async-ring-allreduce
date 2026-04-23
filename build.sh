@@ -27,8 +27,6 @@ nvcc -o benchmark \
     src/naive_hd.cu \
     src/pipelined_hd_nccl.cu \
     src/naive_paard.cu \
-    src/halving_doubling_allreduce.cu \
-    src/pipelined_halving_doubling_nccl.cu \
     -I${NCCL_HOME}/include -L${NCCL_HOME}/lib \
     -I${CRAY_MPICH_PREFIX}/include -L${CRAY_MPICH_PREFIX}/lib \
     -lnccl \

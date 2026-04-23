@@ -55,9 +55,9 @@ static void hd_allreduce_impl(
         int h = S - 1 - d;
         int mask_bit = 1 << h;
         int partner = rank ^ mask_bit;
-        long half_size = (long)mask_bit * chunk_size;          // 2^h chunks
-        long kept_chunk = (long)(rank & ~(mask_bit - 1));      // my kept-half start
-        long sent_chunk = kept_chunk ^ mask_bit;               // my sent-half start
+        long half_size = (long)mask_bit * chunk_size;      // 2^h chunks
+        long kept_chunk = (long)(rank & ~(mask_bit - 1));  // my kept-half start
+        long sent_chunk = kept_chunk ^ mask_bit;           // my sent-half start
         long kept_off = kept_chunk * chunk_size;
         long sent_off = sent_chunk * chunk_size;
 

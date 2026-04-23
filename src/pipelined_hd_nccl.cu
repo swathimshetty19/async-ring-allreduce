@@ -88,7 +88,9 @@ static void hd_pipelined_impl(
             long sub_kept = kept_off + (long)b * sub_half;
 
             NCCL_CALL(ncclGroupStart());
-            NCCL_CALL(ncclSend(d_outbuf + sub_sent, sub_half, ncclFloat, partner, comm, streams[b]));
+            NCCL_CALL(
+                ncclSend(d_outbuf + sub_sent, sub_half, ncclFloat, partner, comm, streams[b])
+            );
             NCCL_CALL(ncclRecv(temp_bufs[b], sub_half, ncclFloat, partner, comm, streams[b]));
             NCCL_CALL(ncclGroupEnd());
 
@@ -122,7 +124,9 @@ static void hd_pipelined_impl(
 
             NCCL_CALL(ncclGroupStart());
             NCCL_CALL(ncclSend(d_outbuf + my_b, sub_block, ncclFloat, partner, comm, streams[b]));
-            NCCL_CALL(ncclRecv(d_outbuf + partner_b, sub_block, ncclFloat, partner, comm, streams[b]));
+            NCCL_CALL(
+                ncclRecv(d_outbuf + partner_b, sub_block, ncclFloat, partner, comm, streams[b])
+            );
             NCCL_CALL(ncclGroupEnd());
         }
 
