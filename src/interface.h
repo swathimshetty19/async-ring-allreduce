@@ -74,10 +74,10 @@ typedef void (*RingRunFunc)(RunArgs* args);
 
 
 // TODO: add new implementations here
-void ring_nccl(RunArgs* args);
+// void ring_nccl(RunArgs* args);
 void ring_naive(RunArgs* args);
 void ring_pipelined_nccl(RunArgs* args);
 // void ring_pipelined_async(RunArgs* args);
-void paard_nccl(RunArgs* args);
 void halving_doubling_allreduce(RunArgs* args);
 void halving_doubling_pipelined(RunArgs* args);
+void paard_nccl(RunArgs* args);

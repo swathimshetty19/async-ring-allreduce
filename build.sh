@@ -22,9 +22,10 @@ module load nccl
 # TODO: add new impls here
 nvcc -o benchmark \
     src/benchmark.cu src/utils.cu \
-    src/nccl_ringreduce.cu \
-    src/naive_ringreduce.cu \
-    src/pipelined_ringreduce_nccl.cu \
+    src/naive_ring.cu \
+    src/pipelined_ring_nccl.cu \
+    src/naive_hd.cu \
+    src/pipelined_hd_nccl.cu \
     src/naive_paard.cu \
     -I${NCCL_HOME}/include -L${NCCL_HOME}/lib \
     -I${CRAY_MPICH_PREFIX}/include -L${CRAY_MPICH_PREFIX}/lib \
