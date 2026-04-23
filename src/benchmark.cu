@@ -16,11 +16,13 @@
 static RingRunFunc impls[] = {
     ring_pipelined_nccl,
     ring_naive,
+    ring_hierarchical,
 };
 
 static const char* impl_names[] = {
     "Pipelined Ring",
     "Classic Ring",
+    "Hierarchical Ring",
 };
 
 
@@ -41,10 +43,19 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // set up GPU for this process
-    int devices_per_node;
-    CUDA_CALL(cudaGetDeviceCount(&devices_per_node));  // may be 1 if MPI isolates devices
-    int local_rank = rank % devices_per_node;
+    // determine node membership: ranks on the same node share memory
+    MPI_Comm node_comm;
+    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &node_comm);
+    int local_rank, local_size;
+    MPI_Comm_rank(node_comm, &local_rank);
+    MPI_Comm_size(node_comm, &local_size);
+    int node_id = rank / local_size;  // assumes contiguous rank assignment per node
+
+    // build rank_to_node table so impls can identify cross-node peers
+    int* rank_to_node = (int*)malloc(n_ranks * sizeof(int));
+    MPI_Allgather(&node_id, 1, MPI_INT, rank_to_node, 1, MPI_INT, MPI_COMM_WORLD);
+
+    // set up GPU for this process using MPI-derived local_rank
     CUDA_CALL(cudaSetDevice(local_rank));
 
     // get NCCL Unique ID from rank 0
@@ -84,6 +95,10 @@ int main(int argc, char** argv) {
             RunArgs args;
             args.input_size = input_size;
             args.comm = comm;
+            args.local_rank = local_rank;
+            args.local_size = local_size;
+            args.node_id = node_id;
+            args.rank_to_node = rank_to_node;
             args.n_warmup = n_warmup;
             args.n_iters = n_iters;
             args.atol = atol;
@@ -137,6 +152,8 @@ int main(int argc, char** argv) {
     }
 
     // cleanup
+    free(rank_to_node);
+    MPI_Comm_free(&node_comm);
     NCCL_CALL(ncclCommDestroy(comm));
     MPI_Finalize();
 

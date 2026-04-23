@@ -24,9 +24,16 @@ static __global__ void add_kernel(float* dest, const float* src, long offset, lo
     if (idx < n) dest[offset + idx] += src[idx];
 }
 
-// ring all-reduce using RS + AG
+// ring all-reduce using RS + AG.
+// rank_to_node: if non-null, steps where this rank communicates cross-node incur a
+// penalty modelled by maybe_penalize_internode (controlled by GLOBAL_PENALTY_US).
 static void ring_allreduce(
-    const float* d_inbuf, float* d_outbuf, long input_size, ncclComm_t comm, cudaStream_t stream
+    const float* d_inbuf,
+    float* d_outbuf,
+    long input_size,
+    ncclComm_t comm,
+    cudaStream_t stream,
+    const int* rank_to_node
 ) {
     // get rank and number of ranks
     int rank, n_ranks;
@@ -45,10 +52,18 @@ static void ring_allreduce(
     float* temp_buf = nullptr;
     CUDA_CALL(cudaMalloc(&temp_buf, chunk_size * sizeof(float)));
 
-    // --- REDUCE-SCATTER ---
     int next_rank = (rank + 1) % n_ranks;
     int prev_rank = (rank - 1 + n_ranks) % n_ranks;
+
+    // true if either ring neighbor is on a different node
+    bool at_boundary = rank_to_node &&
+                       (rank_to_node[rank] != rank_to_node[next_rank] ||
+                        rank_to_node[prev_rank] != rank_to_node[rank]);
+
+    // --- REDUCE-SCATTER ---
     for (int step = 0; step < n_ranks - 1; step++) {
+        if (at_boundary) maybe_penalize_internode(stream);
+
         auto [send_off, recv_off] = get_offset(step, rank, n_ranks, chunk_size);
         NCCL_CALL(ncclGroupStart());
         NCCL_CALL(ncclSend(d_outbuf + send_off, chunk_size, ncclFloat, next_rank, comm, stream));
@@ -64,6 +79,8 @@ static void ring_allreduce(
 
     // --- ALL-GATHER ---
     for (int step = n_ranks - 1; step < 2 * (n_ranks - 1); step++) {
+        if (at_boundary) maybe_penalize_internode(stream);
+
         auto [send_off, recv_off] = get_offset(step, rank, n_ranks, chunk_size);
         NCCL_CALL(ncclGroupStart());
         NCCL_CALL(ncclSend(d_outbuf + send_off, chunk_size, ncclFloat, next_rank, comm, stream));
@@ -107,7 +124,7 @@ void ring_naive(RunArgs* args) {
 
 
     // call ring all-reduce
-    ring_allreduce(d_inbuf, d_outbuf, input_size, comm, stream);
+    ring_allreduce(d_inbuf, d_outbuf, input_size, comm, stream, args->rank_to_node);
 
 
     // copy back result to host and verify output, short circuit if incorrect
@@ -126,14 +143,14 @@ void ring_naive(RunArgs* args) {
 
     // warmup
     for (int i = 0; i < args->n_warmup; i++)
-        ring_allreduce(d_inbuf, d_outbuf, input_size, comm, stream);
+        ring_allreduce(d_inbuf, d_outbuf, input_size, comm, stream, args->rank_to_node);
 
 
     // benchmark
     double* deltas = (double*)malloc(args->n_iters * sizeof(double));
     for (int i = 0; i < args->n_iters; i++) {
         double t0 = get_time();
-        ring_allreduce(d_inbuf, d_outbuf, input_size, comm, stream);
+        ring_allreduce(d_inbuf, d_outbuf, input_size, comm, stream, args->rank_to_node);
         double t1 = get_time();
         deltas[i] = t1 - t0;
     }

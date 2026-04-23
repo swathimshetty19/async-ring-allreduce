@@ -34,6 +34,11 @@ typedef struct {
     // all-reduce arguments
     long input_size;
     ncclComm_t comm;
+    // node topology: used by hierarchical impl and inter-node penalty
+    int local_rank;      // this rank's position within its node (0..local_size-1)
+    int local_size;      // number of ranks per node
+    int node_id;         // which node this rank is on (0-indexed)
+    int* rank_to_node;   // rank_to_node[r] = node_id of world rank r (length = n_ranks)
     // benchmark & correctness arguments
     int n_warmup;
     int n_iters;
@@ -59,6 +64,10 @@ double get_time();
 // compute and record average, std, min, and max latency in µs
 void analyze_runtime(RunArgs* args, double* deltas);
 
+// sync stream then sleep GLOBAL_PENALTY_US microseconds to model a slow inter-node link.
+// reads GLOBAL_PENALTY_US from env on first call; no-op if unset or zero.
+void maybe_penalize_internode(cudaStream_t stream);
+
 
 
 /** A common interface for the thread function that runs the ring algorithm for a rank.
@@ -77,4 +86,5 @@ typedef void (*RingRunFunc)(RunArgs* args);
 void ring_nccl(RunArgs* args);
 void ring_naive(RunArgs* args);
 void ring_pipelined_nccl(RunArgs* args);
+void ring_hierarchical(RunArgs* args);
 // void ring_pipelined_async(RunArgs* args);

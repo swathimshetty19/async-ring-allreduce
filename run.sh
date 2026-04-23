@@ -34,6 +34,10 @@ export FI_CXI_RDZV_GET_MIN=0
 export FI_CXI_RDZV_THRESHOLD=0
 export FI_CXI_RDZV_EAGER_SIZE=0
 
+# synthetic inter-node link penalty (microseconds). default 0 = no penalty.
+# to sweep: GLOBAL_PENALTY_US=100 sbatch run.sh
+export GLOBAL_PENALTY_US=${GLOBAL_PENALTY_US:-0}
+
 module purge
 module load PrgEnv-gnu
 module load cudatoolkit

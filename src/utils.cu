@@ -1,7 +1,9 @@
 // utils.cu
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 #include "interface.h"
 
@@ -36,6 +38,20 @@ double get_time() {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (double)tv.tv_sec * 1e6 + (double)tv.tv_usec;
+}
+
+void maybe_penalize_internode(cudaStream_t stream) {
+    // read penalty once, cache in static (all ranks read the same env var)
+    static long penalty_us = -1;
+    if (penalty_us < 0) {
+        const char* env = getenv("GLOBAL_PENALTY_US");
+        penalty_us = (env && env[0] != '\0') ? atol(env) : 0;
+    }
+    if (penalty_us <= 0) return;
+
+    // drain the stream first so the sleep accounts for the full cross-node round-trip
+    CUDA_CALL(cudaStreamSynchronize(stream));
+    usleep((useconds_t)penalty_us);
 }
 
 void analyze_runtime(RunArgs* args, double* deltas) {
