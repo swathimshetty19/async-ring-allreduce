@@ -27,6 +27,9 @@ if [[ "$DEBUG" == "on" ]]; then
 else
     export NCCL_DEBUG=WARN
 fi
+# keep NCCL chatter out of the CSV on stdout (stdout is captured as results/bench_%j.csv).
+# %j = jobid, %h = host, %p = pid. one log file per rank, separate from the csv.
+export NCCL_DEBUG_FILE=results/nccl_%j_%h_%p.log
 
 # export FI_CXI_ATS=0
 # export OFI_NCCL_DISABLE_DMABUF=1
