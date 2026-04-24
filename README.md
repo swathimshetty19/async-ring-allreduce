@@ -31,9 +31,9 @@ delay(bytes) = GLOBAL_PENALTY_US us  +  bytes / GLOBAL_BW_GBPS ns
 
 The delay is launched as a single-thread `__nanosleep` kernel on the same CUDA
 stream as the NCCL op, so it does **not** block the host and other streams keep
-running — this preserves overlap in the pipelined impl. The flat ring pays per
-step (14× per all-reduce on 8 ranks); the hierarchical algorithm pays once per
-all-reduce, with `bytes` set to the per-rank traffic on the global ring.
+running — this preserves overlap in the pipelined impl. Only the hierarchical
+impl carries the hook, so Classic and Pipelined serve as unmodified real-hardware
+baselines across the sweep.
 
 ```shell
 # pure latency sweep
@@ -44,6 +44,18 @@ for bw in 25 10 5 1; do GLOBAL_BW_GBPS=$bw sbatch run.sh; done
 
 # combined: 50 us + 10 GB/s link
 GLOBAL_PENALTY_US=50 GLOBAL_BW_GBPS=10 sbatch run.sh
+```
+
+### Real inter-node slowdown via NCCL_NET_GDR_LEVEL
+
+As a non-synthetic sanity check, disable GPUDirect RDMA so NCCL must stage
+inter-node transfers through host memory. This slows the actual Slingshot path
+for **every** impl (unlike the synthetic penalty above which only affects
+hierarchical). Use it to validate that the simulated sweep is in the right
+ballpark.
+
+```shell
+NCCL_NET_GDR_LEVEL=0 sbatch run.sh -r
 ```
 
 Results land in `results/bench_<jobid>.csv`. Plot with `utils/plot.py`.

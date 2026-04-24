@@ -27,9 +27,6 @@ if [[ "$DEBUG" == "on" ]]; then
 else
     export NCCL_DEBUG=WARN
 fi
-# keep NCCL chatter out of the CSV on stdout (stdout is captured as results/bench_%j.csv).
-# %j = jobid, %h = host, %p = pid. one log file per rank, separate from the csv.
-export NCCL_DEBUG_FILE=results/nccl_%j_%h_%p.log
 
 # export FI_CXI_ATS=0
 # export OFI_NCCL_DISABLE_DMABUF=1
@@ -37,7 +34,7 @@ export FI_CXI_RDZV_GET_MIN=0
 export FI_CXI_RDZV_THRESHOLD=0
 export FI_CXI_RDZV_EAGER_SIZE=0
 
-# synthetic inter-node link penalty, LogGP-style affine cost:
+# synthetic inter-node link penalty (applied only to hierarchical impl), LogGP-style:
 #   delay(bytes) = GLOBAL_PENALTY_US us  +  bytes / GLOBAL_BW_GBPS ns
 # GLOBAL_PENALTY_US: fixed per-hop latency in microseconds (default 0)
 # GLOBAL_BW_GBPS:    inter-node bandwidth cap in GB/s (default 0 = unlimited)
@@ -47,6 +44,20 @@ export FI_CXI_RDZV_EAGER_SIZE=0
 #   GLOBAL_PENALTY_US=50 GLOBAL_BW_GBPS=10 sbatch run.sh   # both
 export GLOBAL_PENALTY_US=${GLOBAL_PENALTY_US:-0}
 export GLOBAL_BW_GBPS=${GLOBAL_BW_GBPS:-0}
+
+# real inter-node slowdown (no simulation): disable GPUDirect RDMA so inter-node
+# transfers stage through host memory on both sides. affects *every* impl equally
+# (unlike the synthetic penalty above which only hits hierarchical). use this to
+# sanity-check that our simulated sweep lands in the right ballpark.
+# NCCL_NET_GDR_LEVEL values:
+#   (unset) = NCCL decides based on topology (usually PIX/PHB on Perlmutter)
+#   0       = disable GDR everywhere → host-memory staging, ~2x slower inter-node
+#   1..5    = PIX, PXB, PHB, NODE, SYS — incremental relaxations
+# example:
+#   NCCL_NET_GDR_LEVEL=0 sbatch run.sh -r      # real-link degraded run
+if [[ -n "${NCCL_NET_GDR_LEVEL}" ]]; then
+    export NCCL_NET_GDR_LEVEL
+fi
 
 module purge
 module load PrgEnv-gnu
