@@ -8,49 +8,17 @@
 
 #include "interface.h"
 
+// PAARD only works for dragonfly topology with DF(N,2N,N), i.e.,
+// N nodes per router, 2N routers per group, N groups total
+// given our limited compute, we can only run PAARD for DF(1,2,1) with 6 nodes so we hardcode it
+constexpr int N = 1;
+constexpr int P = N;
+constexpr int A = 2 * N;
+constexpr int H = N;
 
-
-static std::pair<long, long> get_offset1(
-    int step, int rank, int n_ranks, int n_groups, long chunk_size
-) {
-    // by the end, rank r should have reduced chunk (n_ranks - 1 - r) % n_groups
-    assert(n_groups <= n_ranks);
-    assert(step >= 0);
-    assert(step < n_groups - 1);
-    long send_chunk = (2 * n_ranks - 2 - rank - step) % n_groups;
-    long recv_chunk = (2 * n_ranks - 3 - rank - step) % n_groups;
-    assert(send_chunk >= 0);
-    assert(recv_chunk >= 0);
-    return {send_chunk * chunk_size, recv_chunk * chunk_size};
-}
-
-static std::pair<long, long> get_offset2(
-    int rank, int group, int n_ranks, int n_groups, long chunk_size
-) {
-    long send_chunk = (n_ranks - 1 - rank) % n_groups;
-    long recv_chunk = group;
-    return {send_chunk * chunk_size, recv_chunk * chunk_size};
-}
-
-static std::pair<long, long> get_offset3(
-    int step,
-    int local_rank,
-    int group,
-    int group_size,
-    int n_groups,
-    long chunk_size,
-    long sbchunk_size
-) {
-    // by the end, rank r should have the reduced sbchunk r
-    assert(step >= 0);
-    assert(step < n_groups - 1);
-    long send_chunk = (2 * group_size - 1 + local_rank - step) % group_size;
-    long recv_chunk = (2 * group_size - 2 + local_rank - step) % group_size;
-    assert(send_chunk >= 0);
-    assert(recv_chunk >= 0);
-    long base_offset = group * chunk_size;
-    return {send_chunk * sbchunk_size + base_offset, recv_chunk * sbchunk_size + base_offset};
-}
+constexpr int group_size = P * A;
+constexpr int n_groups = 1 + A * H;
+constexpr int n_ranks = group_size * n_groups;
 
 
 
@@ -62,19 +30,48 @@ static __global__ void add_kernel(float* dest, const float* src, long offset, lo
 
 
 
+// static void print_debug(
+//     int rank, float* d_outbuf, long input_size, long chunk_sz, ncclComm_t comm, cudaStream_t
+//     stream
+// ) {
+//     float* temp_buf = nullptr;
+//     size_t temp_sz = input_size * n_ranks * sizeof(float);
+//     CUDA_CALL(cudaMalloc(&temp_buf, temp_sz));
+
+//     NCCL_CALL(ncclAllGather(d_outbuf, temp_buf, input_size, ncclFloat, comm, stream));
+//     CUDA_CALL(cudaStreamSynchronize(stream));
+
+//     if (rank == 0) {
+//         float* h_temp_buf = (float*)malloc(temp_sz);
+//         CUDA_CALL(cudaMemcpy(h_temp_buf, temp_buf, temp_sz, cudaMemcpyDeviceToHost));
+
+//         // display each rank's buffer vertically
+//         for (long i = 0; i < input_size; i++) {
+//             for (int r = 0; r < n_ranks; r++) {
+//                 printf("%7.2f ", h_temp_buf[r * input_size + i]);
+//                 if ((r + 1) % group_size == 0) printf(" ");
+//             }
+//             printf("\n");
+//             if ((i + 1) % chunk_sz == 0) printf("\n");
+//         }
+//         printf("\n\n");
+//         fflush(stdout);
+
+//         free(h_temp_buf);
+//     }
+
+//     CUDA_CALL(cudaFree(temp_buf));
+// }
+
+
+
 // paard all-reduce
 static void paard_allreduce(
     const float* d_inbuf, float* d_outbuf, long input_size, ncclComm_t comm, cudaStream_t stream
 ) {
-    // get rank and number of ranks
-    int rank, n_ranks;
+    // get rank and group info
+    int rank;
     ncclCommUserRank(comm, &rank);
-    ncclCommCount(comm, &n_ranks);
-
-    // get group info
-    static constexpr int group_size = 2;  // no. ranks per group
-    assert(n_ranks % group_size == 0);
-    int n_groups = n_ranks / group_size;
     int group = rank / group_size;
     int local_rank = rank % group_size;
 
@@ -84,63 +81,94 @@ static void paard_allreduce(
             d_outbuf, d_inbuf, input_size * sizeof(float), cudaMemcpyDeviceToDevice, stream
         ));
 
-    // compute chunk size and allocate temporary receive buffer
-    assert(input_size % n_groups == 0);
-    assert(input_size % n_ranks == 0);
-    long chunk_size = input_size / n_groups;
-    long sbchunk_size = input_size / n_ranks;
-    float* temp_buf = nullptr;
-    CUDA_CALL(cudaMalloc(&temp_buf, chunk_size * sizeof(float)));
 
     // --- STEP 1: INTERNAL REDUCE-SCATTER ---
-    int local_next = group * group_size + (local_rank + 1) % group_size;
-    int local_prev = group * group_size + (local_rank - 1 + group_size) % group_size;
-    for (int step = 0; step < group_size - 1; step++) {
-        auto [send_off, recv_off] = get_offset1(step, rank, n_ranks, n_groups, chunk_size);
+    long chunk_sz = (input_size + n_groups - 1) / n_groups;
+    long chunk_szl = (input_size % chunk_sz == 0) ? chunk_sz : input_size % chunk_sz;
+
+    float* temp_buf = nullptr;
+    CUDA_CALL(cudaMalloc(&temp_buf, chunk_sz * sizeof(float)));
+
+    int lr_send = group * group_size + (local_rank + 1) % group_size;
+    int lr_recv = group * group_size + (local_rank - 1 + group_size) % group_size;
+
+    {
+        int lch_send = (rank + group) % group_size;
+        int lch_recv = (rank + group + 1) % group_size;
+        if (lch_send >= group) lch_send++;
+        if (lch_recv >= group) lch_recv++;
+
+        long sz_send = (lch_send == n_groups - 1) ? chunk_szl : chunk_sz;
+        long sz_recv = (lch_recv == n_groups - 1) ? chunk_szl : chunk_sz;
+
+        long off_send = lch_send * chunk_sz;
+        long off_recv = lch_recv * chunk_sz;
+
         NCCL_CALL(ncclGroupStart());
-        NCCL_CALL(ncclSend(d_outbuf + send_off, chunk_size, ncclFloat, local_next, comm, stream));
-        NCCL_CALL(ncclRecv(temp_buf, chunk_size, ncclFloat, local_prev, comm, stream));
+        NCCL_CALL(ncclSend(d_outbuf + off_send, sz_send, ncclFloat, lr_send, comm, stream));
+        NCCL_CALL(ncclRecv(temp_buf, sz_recv, ncclFloat, lr_recv, comm, stream));
         NCCL_CALL(ncclGroupEnd());
 
         // reduce
         const int threads = 256;
-        long blocks = (chunk_size + threads - 1) / threads;
-        add_kernel<<<blocks, threads, 0, stream>>>(d_outbuf, temp_buf, recv_off, chunk_size);
+        long blocks = (sz_recv + threads - 1) / threads;
+        add_kernel<<<blocks, threads, 0, stream>>>(d_outbuf, temp_buf, off_recv, sz_recv);
         CUDA_CALL(cudaGetLastError());
     }
+
 
     // --- STEP 2: GLOBAL REDUCE ---
-    int global_nbr = ((n_ranks + group) * (n_groups - 1) - 1 * rank * n_groups) % n_ranks;
+    int gr_send = ((n_ranks + group) * (n_groups - 1) - 1 + rank * n_groups) % n_ranks;
+    int gr_recv = gr_send;
+
+    int gch_send = (n_ranks - 1 - rank) % n_groups;
+    int gch_recv = group;
+
     {
-        auto [send_off, recv_off] = get_offset2(rank, group, n_ranks, n_groups, chunk_size);
+        long sz_send = (gch_send == n_groups - 1) ? chunk_szl : chunk_sz;
+        long sz_recv = (gch_recv == n_groups - 1) ? chunk_szl : chunk_sz;
+
+        long off_send = gch_send * chunk_sz;
+        long off_recv = gch_recv * chunk_sz;
+
         NCCL_CALL(ncclGroupStart());
-        NCCL_CALL(ncclSend(d_outbuf + send_off, chunk_size, ncclFloat, global_nbr, comm, stream));
-        NCCL_CALL(ncclRecv(temp_buf, chunk_size, ncclFloat, global_nbr, comm, stream));
+        NCCL_CALL(ncclSend(d_outbuf + off_send, sz_send, ncclFloat, gr_send, comm, stream));
+        NCCL_CALL(ncclRecv(temp_buf, sz_recv, ncclFloat, gr_recv, comm, stream));
         NCCL_CALL(ncclGroupEnd());
 
         // reduce
         const int threads = 256;
-        long blocks = (chunk_size + threads - 1) / threads;
-        add_kernel<<<blocks, threads, 0, stream>>>(d_outbuf, temp_buf, recv_off, chunk_size);
+        long blocks = (sz_recv + threads - 1) / threads;
+        add_kernel<<<blocks, threads, 0, stream>>>(d_outbuf, temp_buf, off_recv, sz_recv);
         CUDA_CALL(cudaGetLastError());
     }
+
 
     // --- STEP 3: INTERNAL REDUCE-SCATTER ---
-    for (int step = 0; step < group_size - 1; step++) {
-        auto [send_off, recv_off]
-            = get_offset3(step, local_rank, group, group_size, n_groups, chunk_size, sbchunk_size);
+    long sbchunk_sz = (input_size + n_ranks - 1) / n_ranks;
+    long sbchunk_szl = (input_size % sbchunk_sz == 0) ? sbchunk_sz : input_size % sbchunk_sz;
+
+    {
+        int lsbch_send = (rank + 1) % group_size + group * group_size;
+        int lsbch_recv = rank % group_size + group * group_size;
+
+        long sz_send = (lsbch_send == n_ranks - 1) ? sbchunk_szl : sbchunk_sz;
+        long sz_recv = (lsbch_recv == n_ranks - 1) ? sbchunk_szl : sbchunk_sz;
+
+        long off_send = lsbch_send * sbchunk_sz;
+        long off_recv = lsbch_recv * sbchunk_sz;
+
         NCCL_CALL(ncclGroupStart());
-        NCCL_CALL(ncclSend(d_outbuf + send_off, sbchunk_size, ncclFloat, local_next, comm, stream));
-        NCCL_CALL(ncclRecv(temp_buf, sbchunk_size, ncclFloat, local_prev, comm, stream));
+        NCCL_CALL(ncclSend(d_outbuf + off_send, sz_send, ncclFloat, lr_send, comm, stream));
+        NCCL_CALL(ncclRecv(temp_buf, sz_recv, ncclFloat, lr_recv, comm, stream));
         NCCL_CALL(ncclGroupEnd());
 
         // reduce
         const int threads = 256;
-        long blocks = (sbchunk_size + threads - 1) / threads;
-        add_kernel<<<blocks, threads, 0, stream>>>(d_outbuf, temp_buf, recv_off, sbchunk_size);
+        long blocks = (sz_recv + threads - 1) / threads;
+        add_kernel<<<blocks, threads, 0, stream>>>(d_outbuf, temp_buf, off_recv, sz_recv);
         CUDA_CALL(cudaGetLastError());
     }
-
 
     // --- TODO: ALL-GATHER ---
 
@@ -154,10 +182,11 @@ static void paard_allreduce(
 void paard_nccl(RunArgs* args) {
     long input_size = args->input_size;
     ncclComm_t comm = args->comm;
-    int rank, n_ranks, device;
+    int rank, _n_ranks, device;
     ncclCommUserRank(comm, &rank);
-    ncclCommCount(comm, &n_ranks);
+    ncclCommCount(comm, &_n_ranks);
     ncclCommCuDevice(comm, &device);
+    assert(_n_ranks == n_ranks);
 
 
     // initialize CUDA stream
@@ -179,7 +208,7 @@ void paard_nccl(RunArgs* args) {
     CUDA_CALL(cudaMalloc(&d_outbuf, input_size * sizeof(float)));
 
 
-    // call ring all-reduce
+    // call paard all-reduce
     paard_allreduce(d_inbuf, d_outbuf, input_size, comm, stream);
 
 

@@ -33,6 +33,14 @@ static const char* impl_names[] = {
 
 // Usage: ./benchmark
 int main(int argc, char** argv) {
+    // check if paard or hd is being called
+    const int n_impl = sizeof(impls) / sizeof(impls[0]);
+    const bool using_paard = [&]() {
+        for (auto impl : impls)
+            if (impl == paard_nccl) return true;
+        return false;
+    }();
+
     // initialize MPI
     MPI_Init(&argc, &argv);
     int rank, n_ranks;
@@ -46,11 +54,27 @@ int main(int argc, char** argv) {
         MPI_Finalize();
         return 1;
     }
+    if (using_paard && n_ranks != 6) {
+        if (rank == 0) {
+            printf("the number of ranks must equal 6 for paard, got %d", n_ranks);
+            fflush(stdout);
+        }
+        MPI_Finalize();
+        return 1;
+    }
 
     // set up GPU for this process
     int devices_per_node;
-    CUDA_CALL(cudaGetDeviceCount(&devices_per_node));  // may be 1 if MPI isolates devices
-    int local_rank = rank % devices_per_node;
+    CUDA_CALL(cudaGetDeviceCount(&devices_per_node));
+    if (using_paard && devices_per_node != 2) {
+        if (rank == 0) {
+            printf("the number of GPUs/node must equal 2 for paard, got %d\n", devices_per_node);
+            fflush(stdout);
+        }
+        MPI_Finalize();
+        return 1;
+    }
+    int local_rank = rank % 2;
     CUDA_CALL(cudaSetDevice(local_rank));
 
     // get NCCL Unique ID from rank 0
@@ -73,10 +97,9 @@ int main(int argc, char** argv) {
     const int n_warmup = 200;
     const int n_iters = 200;
     const float atol = 1e-3f;
-    const long min_sz = 256;         // 1KB
-    const long max_sz = 2147483648;  // 8GB
+    const long min_sz = (using_paard) ? 384 : 256;  // 1.5 or 1 KB
+    const long max_sz = 2147483648;                 // 8GB
 
-    const int n_impl = sizeof(impls) / sizeof(impls[0]);
     for (int i = 0; i < n_impl; i++) {
         for (long input_size = min_sz; input_size <= max_sz; input_size *= 2) {
             size_t n_bytes = (size_t)input_size * sizeof(float);
