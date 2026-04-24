@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=allreduce_bench
-#SBATCH --nodes=2
-#SBATCH --ntasks-per-node=4
+#SBATCH --nodes=3
+#SBATCH --ntasks-per-node=2
 #SBATCH --constraint gpu
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=32
 #SBATCH --account m4341_g
 #SBATCH --time=00:30:00
@@ -12,12 +12,18 @@
 #SBATCH --error=results/bench_%j.err
 
 DEBUG="on"
+N_RANKS=6
 
 for arg in "$@"; do
     case $arg in
         -r)
             echo "Running in Release Mode"
             DEBUG="off"
+            shift
+            ;;
+        -n=*)
+            N_RANKS="${arg#*-n=}"
+            shift
             ;;
     esac
 done
@@ -40,4 +46,4 @@ module load cudatoolkit
 module load cray-mpich
 module load nccl
 
-srun -u --cpus-per-task=32 --cpu-bind=cores ./benchmark
+srun -u --cpus-per-task=32 --cpu-bind=cores ./benchmark "$N_RANKS"
