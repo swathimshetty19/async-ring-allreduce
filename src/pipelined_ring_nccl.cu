@@ -20,12 +20,6 @@ static std::pair<long, long> get_offset(
     return {send_chunk * chunk_size, recv_chunk * chunk_size};
 }
 
-// element-wise add kernel: dest[i + offset] += src[i]
-static __global__ void add_kernel(float* dest, const float* src, long offset, long n) {
-    long idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) dest[offset + idx] += src[idx];
-}
-
 // ring all-reduce using RS + AG
 static void ring_allreduce(
     const float* d_inbuf, float* d_outbuf, long input_size, ncclComm_t comm, cudaStream_t streams[2]

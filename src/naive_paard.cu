@@ -22,14 +22,6 @@ constexpr int n_ranks = group_size * n_groups;
 
 
 
-// element-wise add kernel: dest[i + offset] += src[i]
-static __global__ void add_kernel(float* dest, const float* src, long offset, long n) {
-    long idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) dest[offset + idx] += src[idx];
-}
-
-
-
 // static void print_debug(
 //     int rank, float* d_outbuf, long input_size, long chunk_sz, ncclComm_t comm, cudaStream_t
 //     stream

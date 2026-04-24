@@ -10,6 +10,12 @@ __global__ void init_input_kernel(float* buf, int rank, long input_size) {
     if (idx < input_size) buf[idx] = 100.0f * rank + idx * 100.0f / input_size;
 }
 
+__global__ void add_kernel(float* dest, const float* src, long offset, long n) {
+    long idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // FIXME: maybe put a __nanosleep here to simulate more work
+    if (idx < n) dest[offset + idx] += src[idx];
+}
+
 bool check_correctness(float* h_res, int rank, int n_ranks, long input_size, float atol) {
     int sum_ranks = n_ranks * (n_ranks - 1) * 50;
 

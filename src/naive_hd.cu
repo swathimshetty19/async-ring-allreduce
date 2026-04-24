@@ -10,12 +10,6 @@
 
 
 
-// element-wise add: dest[i] += src[i]
-static __global__ void add_kernel(float* dest, const float* src, long n) {
-    long idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) dest[idx] += src[idx];
-}
-
 static int ilog2_exact(int x) {
     int r = 0;
     while ((1 << r) < x) r++;
@@ -67,7 +61,7 @@ static void hd_allreduce_impl(
         NCCL_CALL(ncclGroupEnd());
 
         long blocks = (half_size + threads - 1) / threads;
-        add_kernel<<<blocks, threads, 0, stream>>>(d_outbuf + kept_off, temp_buf, half_size);
+        add_kernel<<<blocks, threads, 0, stream>>>(d_outbuf, temp_buf, half_size, kept_off);
         CUDA_CALL(cudaGetLastError());
     }
 

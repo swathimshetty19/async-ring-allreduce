@@ -12,12 +12,6 @@
 
 
 
-// element-wise add: dest[i] += src[i]
-static __global__ void add_kernel(float* dest, const float* src, long n) {
-    long idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) dest[idx] += src[idx];
-}
-
 static int ilog2_exact(int x) {
     int r = 0;
     while ((1 << r) < x) r++;
@@ -96,7 +90,7 @@ static void hd_pipelined_impl(
 
             long blocks = (sub_half + threads - 1) / threads;
             add_kernel<<<blocks, threads, 0, streams[b]>>>(
-                d_outbuf + sub_kept, temp_bufs[b], sub_half
+                d_outbuf, temp_bufs[b], sub_half, sub_kept
             );
             CUDA_CALL(cudaGetLastError());
         }
