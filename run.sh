@@ -45,18 +45,20 @@ export FI_CXI_RDZV_EAGER_SIZE=0
 export GLOBAL_PENALTY_US=${GLOBAL_PENALTY_US:-0}
 export GLOBAL_BW_GBPS=${GLOBAL_BW_GBPS:-0}
 
-# real inter-node slowdown (no simulation): disable GPUDirect RDMA so inter-node
-# transfers stage through host memory on both sides. affects *every* impl equally
-# (unlike the synthetic penalty above which only hits hierarchical). use this to
-# sanity-check that our simulated sweep lands in the right ballpark.
-# NCCL_NET_GDR_LEVEL values:
-#   (unset) = NCCL decides based on topology (usually PIX/PHB on Perlmutter)
-#   0       = disable GDR everywhere → host-memory staging, ~2x slower inter-node
-#   1..5    = PIX, PXB, PHB, NODE, SYS — incremental relaxations
-# example:
-#   NCCL_NET_GDR_LEVEL=0 sbatch run.sh -r      # real-link degraded run
+# real inter-node slowdown (no simulation). two knobs, either may be effective
+# depending on which layer of the stack honors it:
+#   NCCL_NET_GDR_LEVEL=0  — NCCL-core hint (often shadowed by the OFI plugin on Perlmutter)
+#   OFI_NCCL_DISABLE_DMABUF=1 — plugin-level disable of the kernel-bypass data path (more reliable)
+# both force inter-node transfers to stage through host memory, affecting every impl.
+# use for real-hardware validation of the simulated sweep.
+# examples:
+#   NCCL_NET_GDR_LEVEL=0     sbatch run.sh -r
+#   OFI_NCCL_DISABLE_DMABUF=1 sbatch run.sh -r
 if [[ -n "${NCCL_NET_GDR_LEVEL}" ]]; then
     export NCCL_NET_GDR_LEVEL
+fi
+if [[ -n "${OFI_NCCL_DISABLE_DMABUF}" ]]; then
+    export OFI_NCCL_DISABLE_DMABUF
 fi
 
 module purge
