@@ -4,20 +4,24 @@
 # each job writes directly to a named results/*.csv — no manual renaming needed.
 #
 # usage:
-#   ./experiment_run.sh                 # submit all sweep points (8 jobs)
+#   ./experiment_run.sh                 # submit all sweep points (9 jobs)
 #   ./experiment_run.sh --baseline      # just the zero-penalty baseline
 #   ./experiment_run.sh --latency       # just the latency sweep (3 jobs)
 #   ./experiment_run.sh --bandwidth     # just the bandwidth sweep (4 jobs)
 #   ./experiment_run.sh --combined      # just the combined point (1 job)
+#   ./experiment_run.sh --force         # resubmit even if CSV exists
 #   ./experiment_run.sh --dry-run       # print commands without submitting
 #
+# safe to re-run: jobs whose CSV already exists are skipped.
+# if the qos submit limit is hit, the script sleeps and retries every 60s.
+#
 # after all jobs finish:
-#   squeue -u $USER         # wait until empty
-#   ls results/8gpu_*.csv   # inspect outputs
+#   squeue -u $USER                              # wait until empty
+#   ls results/experiment_run/8gpu_*.csv         # inspect outputs
 
-set -euo pipefail
+set -uo pipefail
 
-RESULTS_DIR="results"
+RESULTS_DIR="results/experiment_run"
 mkdir -p "$RESULTS_DIR"
 
 DRY_RUN=0
@@ -25,6 +29,8 @@ RUN_BASELINE=1
 RUN_LATENCY=1
 RUN_BANDWIDTH=1
 RUN_COMBINED=1
+SKIP_EXISTING=1       # if CSV already exists, skip (re)submission
+POLL_INTERVAL=60      # seconds between retries when QoS submit-limit is hit
 
 if [[ $# -gt 0 ]]; then
     RUN_BASELINE=0
@@ -37,6 +43,7 @@ if [[ $# -gt 0 ]]; then
             --latency)   RUN_LATENCY=1 ;;
             --bandwidth) RUN_BANDWIDTH=1 ;;
             --combined)  RUN_COMBINED=1 ;;
+            --force)     SKIP_EXISTING=0 ;;
             --dry-run)
                 DRY_RUN=1
                 RUN_BASELINE=1
@@ -52,7 +59,7 @@ if [[ $# -gt 0 ]]; then
     done
 fi
 
-# submit one sweep point.
+# submit one sweep point, retrying when the QoS submit-limit is hit.
 #   $1 = output basename (no extension), e.g. 8gpu_p100
 #   $2 = env-var assignments as a single string, e.g. "GLOBAL_PENALTY_US=100"
 submit() {
@@ -61,12 +68,36 @@ submit() {
     local out="$RESULTS_DIR/${name}.csv"
     local err="$RESULTS_DIR/${name}.err"
 
+    # skip if the CSV already exists (resumable re-runs)
+    if [[ $SKIP_EXISTING -eq 1 && -s "$out" ]]; then
+        echo "  [$name]  skip — $out already exists (use --force to resubmit)"
+        return 0
+    fi
+
     local cmd="$envs sbatch --output=$out --error=$err run.sh -r"
     echo "  [$name]  $cmd"
 
-    if [[ $DRY_RUN -eq 0 ]]; then
-        eval "$cmd"
+    if [[ $DRY_RUN -eq 1 ]]; then
+        return 0
     fi
+
+    # keep retrying on QoS submit-limit rejections; other failures bubble up
+    while :; do
+        local sbatch_out
+        sbatch_out=$(eval "$cmd" 2>&1)
+        local rc=$?
+        echo "    $sbatch_out"
+        if [[ $rc -eq 0 ]]; then
+            return 0
+        fi
+        if [[ "$sbatch_out" == *"QOSMaxSubmitJobPerUserLimit"* ]]; then
+            echo "    -> queue full, sleeping ${POLL_INTERVAL}s and retrying..."
+            sleep "$POLL_INTERVAL"
+            continue
+        fi
+        echo "    sbatch failed with exit code $rc (not a QoS limit) — aborting"
+        return $rc
+    done
 }
 
 echo "=== async-ring-allreduce penalty sweep ==="
