@@ -8,6 +8,19 @@ cd $PSCRATCH/async-ring-allreduce/
 sbatch ./run.sh  # run, optionally pass -r to run in release mode, and -n=N_RANKS to run with N_RANKS ranks
 ```
 
+## Synthetic inter-node penalty (sweeps)
+
+Cross-group `ncclSend`/`ncclRecv` pairs (see `ncclSendRecv` in `src/utils.cu`) can add an in-stream delay modelling a slow wide-area or global link:
+
+- `GLOBAL_PENALTY_US` — fixed latency α in microseconds (default `0`).
+- `GLOBAL_BW_GBPS` — inverse bandwidth β: extra ns per byte as `1 / rate` when rate is in GB/s (default `0` = no β term).
+
+Both read once per process. Example:
+
+```shell
+GLOBAL_PENALTY_US=100 GLOBAL_BW_GBPS=5 sbatch run.sh -r
+```
+
 ## Contributing
 
 To add a new implementation, you will have to modify these files

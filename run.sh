@@ -40,6 +40,13 @@ export FI_CXI_RDZV_GET_MIN=0
 export FI_CXI_RDZV_THRESHOLD=0
 export FI_CXI_RDZV_EAGER_SIZE=0
 
+# synthetic inter-node penalty (after each cross-group ncclSend/Recv in ncclSendRecv):
+#   delay(bytes) = GLOBAL_PENALTY_US µs  +  bytes / GLOBAL_BW_GBPS ns
+# default 0 = no extra delay (pure hardware). set for sweeps, e.g.:
+#   GLOBAL_PENALTY_US=100 GLOBAL_BW_GBPS=10 sbatch run.sh -r
+export GLOBAL_PENALTY_US=${GLOBAL_PENALTY_US:-0}
+export GLOBAL_BW_GBPS=${GLOBAL_BW_GBPS:-0}
+
 module purge
 module load PrgEnv-gnu
 module load cudatoolkit
